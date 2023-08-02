@@ -1,119 +1,104 @@
-// const express = require("express");
-// const cheerio = require("cheerio");
-// const axios = require("axios");
-
-// const app = express();
-
-// const PORT = process.env.PORT || 3000;
-
-// const website = "https://news.sky.com";
-// // const website = "https://www.youtube.com/@MarkRober/videos";
-
-// try {
-//   axios(website).then((res) => {
-//     const data = res.data;
-//     const $ = cheerio.load(data);
-
-//     let content = [];
-
-//     $(".sdc-site-tile__headline", data).each(function () {
-//       const title = $(this).text();
-//       const url = $(this).find("a").attr("href");
-
-//       content.push({
-//         title,
-//         url
-//       });
-
-//       app.get("/", (req, res) => {
-//         res.json(content);
-//       });
-//     });
-//   });
-// } catch (error) {
-//   console.log(error, error.message);
-// }
-
-// app.listen(PORT, () => {
-//   console.log(`server is running on PORT:${PORT}`);
-// });
-
-
-// const express = require("express");
-// const cheerio = require("cheerio");
-// const axios = require("axios");
-
-// const app = express();
-
-// const PORT = process.env.PORT || 3000;
-
-// const website = "https://www.youtube.com/@MarkRober/videos";
-
-// try {
-//   axios(website).then((res) => {
-//     const data = res.data;
-//     const $ = cheerio.load(data);
-//     console.log(data);
-
-//     let content = [];
-
-//     $("yt-formatted-string", data).each(function (index) {
-//       if (index < 3) {
-//         const title = $(this).text().trim();
-//         console.log(title);
-//         const url = $(this).parent().attr("href");
-
-//         content.push({
-//           title,
-//           url: `https://www.youtube.com${url}`
-//         });
-//       }
-//     });
-
-//     app.get("/", (req, res) => {
-//       res.json(content);
-//     });
-//   });
-// } catch (error) {
-//   console.log(error, error.message);
-// }
-
-// app.listen(PORT, () => {
-//   console.log(`server is running on PORT:${PORT}`);
-// });
-
 const express = require("express");
-
 const puppeteer = require("puppeteer");
 
 const app = express();
-
 const PORT = process.env.PORT || 3000;
 
-const website = "https://www.youtube.com/@MarkRober/videos";
+const channels = ["MarkRober", "MrBeast", "Veritasium"];
+
+async function scrapeChannelVideos(channelName) {
+  const website = `https://www.youtube.com/@${channelName}/videos`;
+
+  const browser = await puppeteer.launch({headless: "new"});
+  const page = await browser.newPage();
+
+  await page.goto(website);
+
+  // Youtube
+  const videoTitles = await page.$$eval(
+    "yt-formatted-string#video-title",
+    (titles) =>
+      titles.slice(0, 3).map((title) => ({
+        title: title.textContent.trim(),
+        url: `https://www.youtube.com${title.parentElement.getAttribute(
+          "href"
+        )}`,
+      }))
+  );
+
+  return videoTitles;
+}
 
 app.get("/", async (req, res) => {
   try {
-    const browser = await puppeteer.launch();
-    const page = await browser.newPage();
-    await page.goto(website);
-
-    const videoTitles = await page.$$eval(
-      "yt-formatted-string#video-title",
-      (videoTitles) =>
-        videoTitles
-          .slice(0, 3)
-          .map((videoTitle) => ({
-            title: videoTitle.textContent.trim(),
-            url: `https://www.youtube.com${videoTitle.parentElement.getAttribute(
-              "href"
-            )}`,
-          }))
+    const videoTitles = await Promise.all(
+      channels.map((channel) => scrapeChannelVideos(channel))
     );
 
-    await browser.close();
+    const browser = await puppeteer.launch({headless: "new"});
+    const page = await browser.newPage();
 
-    res.json(videoTitles);
+    // Instagram
+    await page.goto("https://www.instagram.com/uconnlatenight/");
+
+    // Wait for the parent tag to load
+    await page.waitForSelector("div._aagu");
+
+    // Get the first three instances of the parent tag
+    const parentElements = await page.$$eval("div._aagu", (elements) => {
+      return elements.slice(0, 3).map((element) => element.innerHTML);
+    });
+
+    // Extract and display the description from each parent element
+    parentElements.forEach((html, index) => {
+      const description = html.match(/alt="(.*?)"/)[1];
+      console.log(`Description ${index + 1}: ${description}`);
+    });
+
+    browser.close();
+
+    console.log(parentElements);
+
+    const html = `
+        <html>
+          <head>
+            <title>Time-waste</title>
+            <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" integrity="sha384-rbsA2VBKQhggwzxH7pPCaAqO46MgnOM80zW1RWuH61DGLwZJEdK2Kadq2F9CUG65" crossorigin="anonymous">
+          </head>
+          <body>
+            <div class="container mt-4">
+              <table class="table">
+                <thead>
+                  <tr>
+                    ${channels.map((channel) => `<th>${channel}</th>`).join("")}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    ${videoTitles
+                      .map(
+                        (titles) =>
+                          `<td>
+                            <ul class="list-group">
+                              ${titles
+                                .map(
+                                  (video) =>
+                                    `<li class="list-group-item"><a href="${video.url}">${video.title}</a></li>`
+                                )
+                                .join("")}
+                            </ul>
+                          </td>`
+                      )
+                      .join("")}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </body>
+        </html>
+      `;
+
+    res.send(html);
   } catch (error) {
     console.log(error, error.message);
     res.status(500).send("Internal Server Error");
